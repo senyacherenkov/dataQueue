@@ -8,9 +8,9 @@
 #include <type_traits>
 #include <atomic>
 
-template <typename T, std::size_t QUEUE_SIZE = 256, class Allocator = std::allocator<T>,
-          typename = typename std::enable_if<std::is_nothrow_copy_constructible<T>::value>::type,
-          typename = typename std::enable_if<std::is_default_constructible<T>::value>::type
+template <typename T, std::size_t QUEUE_SIZE = 256, class Allocator = std::allocator<T>,          
+          typename = typename std::enable_if<std::is_default_constructible<T>::value>::type,
+          typename = typename std::enable_if<std::is_nothrow_copy_constructible<T>::value>::type
           >
 class DataQueue{
 public:
@@ -42,19 +42,15 @@ public:
     }
 
     bool try_push(const T& item) {
-        if(!m_isFull)
+        if(!m_size == QUEUE_SIZE)
         {
-            if(m_isEmpty) {
-                {
-                    std::lock_guard<std::mutex> lckHead{m_headMutex};
-                    m_head = m_allocator.allocate(sizeof(QueueNode));
-                    m_allocator.construct(m_head, item);
+            if(m_size == 0) {
+                std::lock_guard<std::mutex> lckHead{m_headMutex};
+                m_head = m_allocator.allocate(sizeof(QueueNode));
+                m_allocator.construct(m_head, item);
 
-
-                    std::lock_guard<std::mutex> lckTail{m_tailMutex};
-                    m_tail = m_head;
-                }
-                m_isEmpty = false;
+                std::lock_guard<std::mutex> lckTail{m_tailMutex};
+                m_tail = m_head;
             }
             else {
                 QueueNode* temp = m_allocator.allocate(sizeof(QueueNode));
@@ -73,46 +69,59 @@ public:
                 m_tail = temp;
             }
 
-            ++m_size;
-            if(m_size == QUEUE_SIZE)
-                m_isFull = true;
+            ++m_size;            
 
+            m_pushed.notify_all();
             return true;
         }
         return false;
     }
 
     void wait_push(const T& item) {
-        while(m_isFull);
-        try_push(item);
+        {
+            std::unique_lock<std::mutex> guard(m_waitMutex);
+            m_pushed.wait(guard, [this]{return m_size != QUEUE_SIZE || m_forceStop;});
+        }
+        if(!m_forceStop)
+            try_push(item);
+        else
+            m_forceStop = false;
     }
 
     bool try_pop(T& item) {
-        if(m_isEmpty)
+        if(m_size == 0)
             return false;
 
         std::lock_guard<std::mutex> guard1(m_headMutex);
         item = m_head->m_item;
-        QueueNode* temp = m_head->next;
+        QueueNode* temp = m_head->next;        
 
-        m_allocator.destroy(m_head);
-        m_allocator.deallocate(m_head, 1);
+        if(temp)
+            m_head = temp;
 
-        m_head = temp;
+        m_size--;
 
         return true;
     }
 
     void wait_pop(T& item) {
-        while(m_isEmpty);
-        try_pop(item);
+        {
+            std::unique_lock<std::mutex> guard(m_waitMutex);
+            m_pushed.wait(guard, [this]{return m_head != nullptr || m_forceStop;});
+        }
+        if(!m_forceStop)
+            try_pop(item);
+        else
+            m_forceStop = false;
     }
 
-    void clear();    
+    bool empty() const { return m_size == 0; }
+    bool full() const {return m_size == QUEUE_SIZE; }
+    void stop_waiting() {
+        m_forceStop = true;
+        m_pushed.notify_all();
+    }
 
-    bool empty() const { return m_isEmpty; }
-    bool full() const {return m_isFull; }
-    void stop_waiting();
 private:
     struct QueueNode {
         QueueNode() = default;
@@ -124,12 +133,14 @@ private:
         QueueNode* next = nullptr;
     };
 private:
-    Allocator           m_allocator;
-    QueueNode*          m_head = nullptr;
-    QueueNode*          m_tail = nullptr;
-    std::mutex          m_headMutex;
-    std::mutex          m_tailMutex;
-    std::atomic<bool>   m_isEmpty = true;
-    std::atomic<bool>   m_isFull = false;
-    std::atomic<size_t> m_size = 0;
+    Allocator                   m_allocator;
+    QueueNode*                  m_head = nullptr;
+    QueueNode*                  m_tail = nullptr;
+    std::mutex                  m_headMutex;
+    std::mutex                  m_tailMutex;
+    std::mutex                  m_waitMutex;
+    std::mutex                  m_allocMutex;
+    std::atomic<size_t>         m_size = 0;
+    std::atomic<bool>           m_forceStop = false;
+    std::condition_variable     m_pushed;
 };
