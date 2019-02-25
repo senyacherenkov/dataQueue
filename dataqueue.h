@@ -8,7 +8,7 @@
 #include <type_traits>
 #include <atomic>
 
-template <typename T, std::size_t QUEUE_SIZE = 256, class Allocator = std::allocator<T>,
+template <typename T, std::size_t QUEUE_SIZE = 256,
           typename = typename std::enable_if<std::is_nothrow_copy_constructible<T>::value>::type,
           typename = typename std::enable_if<std::is_default_constructible<T>::value>::type>
 class DataQueue{
@@ -29,62 +29,84 @@ public:
     DataQueue& operator= (const DataQueue& other) = delete;    
 
     ~DataQueue() {
+        while(tryPop());
     }
 
     bool tryPush(const T& newItem) {
         std::shared_ptr<T> newData = std::make_shared<T>(newItem);
-
         std::unique_ptr<node> newVertex(std::make_unique<node>());
 
         {
-            std::lock_guard<std::mutex> tail_lock(m_tailMutex);
+            std::lock_guard<std::mutex> tailLock(m_tailMutex);
 
             if(m_tail->number > QUEUE_SIZE)
                 return false;
 
-            m_tail->number++;
-            m_tail->data = newData;
-            node* const newTail = newVertex.get();
-            m_tail->next = std::move(newVertex);
-            m_tail = newTail;
+            pushToTail(newData, newVertex);
         }
 
         m_dataAwaiting.notify_one();
         return true;
     }
 
-    void waitPush(const T& item) {
 
+    void waitPush(const T& newItem) {
+        std::shared_ptr<T> newData = std::make_shared<T>(newItem);
+        std::unique_ptr<node> newVertex(std::make_unique<node>());
+
+        {
+            std::unique_lock<std::mutex> tailLock(waitForRoom());
+            pushToTail(newData, newVertex);
+        }
+
+        m_dataAwaiting.notify_one();
     }
 
     bool tryPop(T& item) {
         std::unique_ptr<node> const oldHead = tryPopHead(item);
+        m_roomAwaiting.notify_one();
         return oldHead;
     }
 
     std::shared_ptr<T> tryPop() {
         std::unique_ptr<node> const oldHead = tryPopHead();
+        m_roomAwaiting.notify_one();
         return oldHead? oldHead->data: std::shared_ptr<T>();
     }
 
     void waitPop(T& item) {
         waitPopHead(item);
+        if(m_stopWaitForData.exchange(false, std::memory_order_acquire))
+            return;
+        m_roomAwaiting.notify_one();
     }
 
     std::shared_ptr<T> waitPop() {
         std::unique_ptr<node> const oldHead = waitPopHead();
+        if(!oldHead)
+            return std::shared_ptr<T>();
+        m_roomAwaiting.notify_one();
         return oldHead->data;
-    }
-
-    void clear();    
+    }    
 
     bool empty() const {
         std::lock_guard<std::mutex> headLock(m_headMutex);
         return (m_head.get() == getTail());
     }
 
-    bool full() const {}
-    void stop_waiting();
+    bool full() const {
+        return (getTail()->number == QUEUE_SIZE);
+    }
+
+    void stop_waiting(){
+        if(empty()) {
+            m_stopWaitForData.store(true, std::memory_order_release);
+            m_dataAwaiting.notify_all();
+        } else if(full()) {
+            m_stopWaitForRoom.store(true, std::memory_order_release);
+            m_roomAwaiting.notify_all();
+        }
+    }
 
 private:
     node* getTail()
@@ -127,19 +149,24 @@ private:
     std::unique_lock<std::mutex> waitForData()
     {
         std::unique_lock<std::mutex> headLock(m_headMutex);
-        m_dataAwaiting.wait(headLock, [&](){ return m_head.get() != getTail(); });
+        m_dataAwaiting.wait(headLock, [&](){ return (m_head.get() != getTail()) ||
+                    m_stopWaitForData.load(std::memory_order_acquire); });
         return headLock;
     }
 
     std::unique_ptr<node> waitPopHead()
     {
         std::unique_lock<std::mutex> headLock(waitForData());
+        if(m_stopWaitForData.exchange(false))
+            return std::unique_ptr<T>();
         return popHead();
     }
 
     std::unique_ptr<node> waitPopHead(T& item)
     {
         std::unique_lock<std::mutex> headLock(waitForData());
+        if(m_stopWaitForData.load(std::memory_order_acquire))
+            return std::unique_ptr<T>();
         item = std::move(m_head->data);
         return popHead();
     }
@@ -150,19 +177,23 @@ private:
     std::unique_lock<std::mutex> waitForRoom()
     {
         std::unique_lock<std::mutex> tailLock(m_tailMutex);
-        m_roomAwaiting.wait(tailLock, [&](){ return m_tail->number <= QUEUE_SIZE; });
+        m_roomAwaiting.wait(tailLock, [&](){ return (m_tail->number <= QUEUE_SIZE) ||
+                    m_stopWaitForRoom.load(std::memory_order_acquire); });
         return tailLock;
     }
 
-    void waitPushData(T& item)
+    void pushToTail(std::shared_ptr<T>& newData, std::unique_ptr<node> newVertex)
     {
-        std::shared_ptr<T> newData = std::make_shared<T>(item);
-        std::unique_lock<std::mutex> tailLock(waitForRoom());
+        m_tail->number++;
         m_tail->data = newData;
+        node* const newTail = newVertex.get();
+        m_tail->next = std::move(newVertex);
+        m_tail = newTail;
     }
     /*****PUSH AREA END*****/
 private:
-    Allocator               m_allocator;
+    std::atomic_bool        m_stopWaitForData;
+    std::atomic_bool        m_stopWaitForRoom;
     std::mutex              m_headMutex;
     std::unique_ptr<node>   m_head;
     std::mutex              m_tailMutex;
