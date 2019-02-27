@@ -56,6 +56,8 @@ public:
 
         {
             std::unique_lock<std::mutex> tailLock(waitForRoom());
+            if(m_stopWaitForData.load(std::memory_order_acquire))
+                return;
             pushToTail(newData, newVertex);
         }
 
@@ -75,15 +77,15 @@ public:
     }
 
     void waitPop(T& item) {
-        waitPopHead(item);
-        if(m_stopWaitForData.exchange(false, std::memory_order_acquire))
+        std::unique_ptr<node> const oldHead = waitPopHead(item);
+        if(!oldHead.get())
             return;
         m_roomAwaiting.notify_one();
     }
 
     std::shared_ptr<T> waitPop() {
         std::unique_ptr<node> const oldHead = waitPopHead();
-        if(!oldHead)
+        if(!oldHead.get())
             return std::shared_ptr<T>();
         m_roomAwaiting.notify_one();
         return oldHead->data;
@@ -157,7 +159,7 @@ private:
     std::unique_ptr<node> waitPopHead()
     {
         std::unique_lock<std::mutex> headLock(waitForData());
-        if(m_stopWaitForData.exchange(false))
+        if(m_stopWaitForData.exchange(false, std::memory_order_acquire))
             return std::unique_ptr<T>();
         return popHead();
     }
@@ -165,7 +167,7 @@ private:
     std::unique_ptr<node> waitPopHead(T& item)
     {
         std::unique_lock<std::mutex> headLock(waitForData());
-        if(m_stopWaitForData.load(std::memory_order_acquire))
+        if(m_stopWaitForData.exchange(false, std::memory_order_acquire))
             return std::unique_ptr<T>();
         item = std::move(m_head->data);
         return popHead();
