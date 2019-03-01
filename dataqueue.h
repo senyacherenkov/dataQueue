@@ -56,9 +56,9 @@ public:
 
         {
             std::unique_lock<std::mutex> tailLock(waitForRoom());
-            if(m_stopWaitForData.load(std::memory_order_acquire))
+            if(m_stopWaitForData.exchange(false, std::memory_order_acquire))
                 return;
-            pushToTail(newData, newVertex);
+            pushToTail(newData, std::move(newVertex));
         }
 
         m_dataAwaiting.notify_one();
@@ -67,7 +67,7 @@ public:
     bool tryPop(T& item) {
         std::unique_ptr<node> const oldHead = tryPopHead(item);
         m_roomAwaiting.notify_one();
-        return oldHead;
+        return oldHead.get();
     }
 
     std::shared_ptr<T> tryPop() {
@@ -91,16 +91,16 @@ public:
         return oldHead->data;
     }    
 
-    bool empty() const {
+    bool empty() {
         std::lock_guard<std::mutex> headLock(m_headMutex);
         return (m_head.get() == getTail());
     }
 
-    bool full() const {
+    bool full() {
         return (getTail()->number == QUEUE_SIZE);
     }
 
-    void stop_waiting(){
+    void stopWaiting(){
         if(empty()) {
             m_stopWaitForData.store(true, std::memory_order_release);
             m_dataAwaiting.notify_all();
@@ -160,7 +160,8 @@ private:
     {
         std::unique_lock<std::mutex> headLock(waitForData());
         if(m_stopWaitForData.exchange(false, std::memory_order_acquire))
-            return std::unique_ptr<T>();
+            return std::unique_ptr<node>();
+        getTail()->number--;
         return popHead();
     }
 
@@ -168,8 +169,9 @@ private:
     {
         std::unique_lock<std::mutex> headLock(waitForData());
         if(m_stopWaitForData.exchange(false, std::memory_order_acquire))
-            return std::unique_ptr<T>();
-        item = std::move(m_head->data);
+            return std::unique_ptr<node>();
+        getTail()->number--;
+        item = std::move(*m_head->data);
         return popHead();
     }
 
@@ -179,23 +181,23 @@ private:
     std::unique_lock<std::mutex> waitForRoom()
     {
         std::unique_lock<std::mutex> tailLock(m_tailMutex);
-        m_roomAwaiting.wait(tailLock, [&](){ return (m_tail->number <= QUEUE_SIZE) ||
+        m_roomAwaiting.wait(tailLock, [&](){ return (m_tail->number < QUEUE_SIZE) ||
                     m_stopWaitForRoom.load(std::memory_order_acquire); });
         return tailLock;
     }
 
     void pushToTail(std::shared_ptr<T>& newData, std::unique_ptr<node> newVertex)
     {
-        m_tail->number++;
         m_tail->data = newData;
         node* const newTail = newVertex.get();
         m_tail->next = std::move(newVertex);
-        m_tail = newTail;
+        newTail->number = ++m_tail->number;
+        m_tail = newTail;        
     }
     /*****PUSH AREA END*****/
 private:
-    std::atomic_bool        m_stopWaitForData;
-    std::atomic_bool        m_stopWaitForRoom;
+    std::atomic_bool        m_stopWaitForData{false};
+    std::atomic_bool        m_stopWaitForRoom{false};
     std::mutex              m_headMutex;
     std::unique_ptr<node>   m_head;
     std::mutex              m_tailMutex;
