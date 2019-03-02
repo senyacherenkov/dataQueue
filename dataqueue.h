@@ -42,7 +42,7 @@ public:
             if(m_tail->number > QUEUE_SIZE)
                 return false;
 
-            pushToTail(newData, newVertex);
+            pushToTail(newData, std::move(newVertex));
         }
 
         m_dataAwaiting.notify_one();
@@ -56,8 +56,11 @@ public:
 
         {
             std::unique_lock<std::mutex> tailLock(waitForRoom());
-            if(m_stopWaitForData.exchange(false, std::memory_order_acquire))
+
+            if(m_stopWaitForRoom.exchange(false, std::memory_order_acq_rel)) {
                 return;
+            }
+
             pushToTail(newData, std::move(newVertex));
         }
 
@@ -159,7 +162,7 @@ private:
     std::unique_ptr<node> waitPopHead()
     {
         std::unique_lock<std::mutex> headLock(waitForData());
-        if(m_stopWaitForData.exchange(false, std::memory_order_acquire))
+        if(m_stopWaitForData.exchange(false, std::memory_order_acq_rel))
             return std::unique_ptr<node>();
         getTail()->number--;
         return popHead();
@@ -168,7 +171,7 @@ private:
     std::unique_ptr<node> waitPopHead(T& item)
     {
         std::unique_lock<std::mutex> headLock(waitForData());
-        if(m_stopWaitForData.exchange(false, std::memory_order_acquire))
+        if(m_stopWaitForData.exchange(false, std::memory_order_acq_rel))
             return std::unique_ptr<node>();
         getTail()->number--;
         item = std::move(*m_head->data);
