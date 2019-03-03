@@ -29,7 +29,7 @@ void unpredictableDelay(int extra = 0) {
 using namespace boost::unit_test;
 BOOST_AUTO_TEST_SUITE(test_suite_main)
 
-BOOST_AUTO_TEST_CASE(one_writer_one_reader_tryPush_tryPop)
+BOOST_AUTO_TEST_CASE(one_writer_one_reader_tryPush_tryPop_first_overload)
 {
     DataQueue<int, QUEUE_SIZE> queue;
 
@@ -59,7 +59,38 @@ BOOST_AUTO_TEST_CASE(one_writer_one_reader_tryPush_tryPop)
     reader.join();
 }
 
-BOOST_AUTO_TEST_CASE(one_writer_one_reader_waitPush_waitPop)
+BOOST_AUTO_TEST_CASE(one_writer_one_reader_tryPush_tryPop_second_overload)
+{
+    DataQueue<int, QUEUE_SIZE> queue;
+
+    std::thread writer([&]() {
+                    for (int j = 0; j < QUEUE_SIZE; ++j) {
+                        BOOST_CHECK_MESSAGE(queue.tryPush(j), "value wasn't pushed");
+                    }
+                    unpredictableDelay(10);
+              });
+
+    std::thread reader([&]() {
+        int counter = 0;
+        unpredictableDelay(10);
+        BOOST_CHECK_MESSAGE(!queue.empty(), "queue is empty");
+
+        while (!queue.empty()) {
+            auto element = queue.tryPop();
+            BOOST_CHECK_MESSAGE(element.get() != nullptr, "value wasn't popped");
+            BOOST_CHECK_MESSAGE(*element == counter, "Expected value " << counter << "; real value " << element);
+            ++counter;
+        }
+        auto element = queue.tryPop();
+        BOOST_CHECK_MESSAGE(element.get() == nullptr, "Expected that queue has no element to be popped");
+        BOOST_CHECK_MESSAGE(queue.empty(), "Expected that queue is empty");
+    });
+
+    writer.join();
+    reader.join();
+}
+
+BOOST_AUTO_TEST_CASE(one_writer_one_reader_waitPush_waitPop_first_overload)
 {
     DataQueue<int, QUEUE_SIZE> queue;
 
@@ -79,7 +110,35 @@ BOOST_AUTO_TEST_CASE(one_writer_one_reader_waitPush_waitPop)
             BOOST_CHECK_MESSAGE(element == j, "Expected value " << j << "; real value " << element);
             ++j;
         }
-        BOOST_CHECK_MESSAGE(!queue.tryPop(element), "Expected queue to be empty");
+        BOOST_CHECK_MESSAGE(!queue.tryPop(element), "Expected that queue is empty");
+    });
+
+    writer.join();
+    reader.join();
+}
+
+
+BOOST_AUTO_TEST_CASE(one_writer_one_reader_waitPush_waitPop_second_overload)
+{
+    DataQueue<int, QUEUE_SIZE> queue;
+
+    std::thread writer([&]() {
+                    for (int j = 0; j < NUMBER_OF_ELEMENTS; ++j) {
+                        unpredictableDelay(10);
+                        queue.waitPush(j);
+                    }
+
+              });
+
+    std::thread reader([&]() {
+        for (int j = 0; j < NUMBER_OF_ELEMENTS;) {
+            unpredictableDelay();
+            auto element = queue.waitPop();
+            BOOST_CHECK_MESSAGE(*element == j, "Expected value " << j << "; real value " << element);
+            ++j;
+        }
+        auto element = queue.tryPop();
+        BOOST_CHECK_MESSAGE(element.get() == nullptr, "Expected that queue is empty");
     });
 
     writer.join();
