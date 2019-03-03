@@ -1,22 +1,21 @@
 language: cpp
+dist: trusty
+sudo: false
+os: linux
+
 matrix:
   include:
-    - os: linux
-      env: COMPILER_NAME=gcc CXX=g++-5 CC=gcc-5
+    - env: COMPILER=g++-6 BUILD=Debug STANDARD=14
+      compiler: gcc
       addons:
         apt:
-          packages:
-            - g++-5
-          sources: &sources
-            - llvm-toolchain-precise-3.8
+          update: true
+          sources:
+            - sourceline: 'ppa:mhier/libboost-latest'
             - ubuntu-toolchain-r-test
-    - os: linux
-      env: COMPILER_NAME=clang CXX=clang++-3.8 CC=clang-3.8
-      addons:
-        apt:
           packages:
-            - clang-3.8
-          sources: *sources	
+            - g++-6
+            - boost1.67    
 before_script:
 - sudo apt-get install libboost-test-dev -y
 script:
