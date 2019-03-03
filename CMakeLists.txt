@@ -5,7 +5,7 @@ project(dataQueue VERSION 0.0.$ENV{TRAVIS_BUILD_NUMBER})
 find_package(Boost COMPONENTS unit_test_framework REQUIRED)
 
 set(CMAKE_BUILD_TYPE DEBUG)
-
+set ( CMAKE_CXX_FLAGS "-std=c++14")
 include_directories(${Boost_INCLUDE_DIR})
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
