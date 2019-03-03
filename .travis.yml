@@ -16,8 +16,6 @@ matrix:
           packages:
             - g++-6
             - boost1.67    
-before_script:
-- sudo apt-get install libboost-test-dev -y
 script:
 - cmake .
 - cmake --build .
