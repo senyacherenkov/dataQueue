@@ -24,10 +24,49 @@ void unpredictableDelay(int extra = 0) {
     std::this_thread::sleep_for(delay);
 }
 
+struct UserClassData {
+    int integerMember;
+    double floatingPointMember;
+};
+
 }
 
 using namespace boost::unit_test;
 BOOST_AUTO_TEST_SUITE(test_suite_main)
+
+BOOST_AUTO_TEST_CASE(one_writer_one_reader_tryPush_tryPop_first_overload_user_type_data)
+{
+    DataQueue<UserClassData, QUEUE_SIZE> queue;
+
+    std::thread writer([&]() {
+                    for (int j = 0; j < QUEUE_SIZE; ++j) {
+                        UserClassData data;
+                        data.integerMember = j;
+                        data.floatingPointMember = static_cast<double>(j)*0.5;
+                        BOOST_CHECK_MESSAGE(queue.tryPush(data), "value wasn't pushed");
+                    }
+                    unpredictableDelay(10);
+              });
+
+    std::thread reader([&]() {
+        UserClassData data;
+        int counter = 0;
+        unpredictableDelay(10);
+        BOOST_CHECK_MESSAGE(!queue.empty(), "queue is empty");
+
+        while (!queue.empty()) {
+            BOOST_CHECK_MESSAGE(queue.tryPop(data), "value wasn't popped");
+            BOOST_CHECK_MESSAGE(data.integerMember == counter, "Expected value " << counter << "; real value " << data.integerMember);
+            ++counter;
+        }
+        BOOST_CHECK_MESSAGE(!queue.tryPop(data), "Expected that queue has no element to be popped");
+        BOOST_CHECK_MESSAGE(queue.empty(), "Expected that queue is empty");
+    });
+
+    writer.join();
+    reader.join();
+}
+
 
 BOOST_AUTO_TEST_CASE(one_writer_one_reader_tryPush_tryPop_first_overload)
 {
