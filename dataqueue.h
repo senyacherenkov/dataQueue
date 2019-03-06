@@ -8,23 +8,21 @@
 #include <type_traits>
 #include <atomic>
 
-template <std::size_t QUEUE_SIZE = 256>
+template <typename T, std::size_t QUEUE_SIZE = 256,
+          typename = typename std::enable_if<std::is_nothrow_copy_constructible<T>::value>::type,
+          typename = typename std::enable_if<std::is_default_constructible<T>::value>::type>
 class DataQueue{
 private:
-    template <typename T,
-              typename = typename std::enable_if<std::is_nothrow_copy_constructible<T>::value>::type,
-              typename = typename std::enable_if<std::is_default_constructible<T>::value>::type>
     struct node
     {
         std::shared_ptr<T> data {nullptr};
-        std::unique_ptr<node<T>> next {nullptr};
+        std::unique_ptr<node> next {nullptr};
         int number = 0;
     };
 
 public:
-
     DataQueue():
-        m_head(std::make_unique<node<void*>>()), m_tail(m_head.get())
+        m_head(std::make_unique<node>()), m_tail(m_head.get())
     {}
 
     DataQueue(const DataQueue& other) = delete;
@@ -34,12 +32,9 @@ public:
         while(tryPop());
     }
 
-    template <typename T,
-              typename = typename std::enable_if<std::is_nothrow_copy_constructible<T>::value>::type,
-              typename = typename std::enable_if<std::is_default_constructible<T>::value>::type>
     bool tryPush(const T& newItem) {
         std::shared_ptr<T> newData = std::make_shared<T>(newItem);
-        std::unique_ptr<node<T>> newVertex(std::make_unique<node>());
+        std::unique_ptr<node> newVertex(std::make_unique<node>());
 
         {
             std::lock_guard<std::mutex> tailLock(m_tailMutex);
@@ -54,12 +49,10 @@ public:
         return true;
     }
 
-    template <typename T,
-              typename = typename std::enable_if<std::is_nothrow_copy_constructible<T>::value>::type,
-              typename = typename std::enable_if<std::is_default_constructible<T>::value>::type>
+
     void waitPush(const T& newItem) {
         std::shared_ptr<T> newData = std::make_shared<T>(newItem);
-        std::unique_ptr<node<T>> newVertex(std::make_unique<node>());
+        std::unique_ptr<node> newVertex(std::make_unique<node>());
 
         {
             std::unique_lock<std::mutex> tailLock(waitForRoom());
@@ -74,44 +67,32 @@ public:
         m_dataAwaiting.notify_one();
     }
 
-    template <typename T,
-              typename = typename std::enable_if<std::is_nothrow_copy_constructible<T>::value>::type,
-              typename = typename std::enable_if<std::is_default_constructible<T>::value>::type>
     bool tryPop(T& item) {
-        std::unique_ptr<node<T>> const oldHead = tryPopHead(item);
+        std::unique_ptr<node> const oldHead = tryPopHead(item);
         m_roomAwaiting.notify_one();
         return oldHead.get();
     }
 
-    template <typename T,
-              typename = typename std::enable_if<std::is_nothrow_copy_constructible<T>::value>::type,
-              typename = typename std::enable_if<std::is_default_constructible<T>::value>::type>
     std::shared_ptr<T> tryPop() {
-        std::unique_ptr<node<T>> const oldHead = tryPopHead();
+        std::unique_ptr<node> const oldHead = tryPopHead();
         m_roomAwaiting.notify_one();
         return oldHead? oldHead->data: std::shared_ptr<T>();
     }
 
-    template <typename T,
-              typename = typename std::enable_if<std::is_nothrow_copy_constructible<T>::value>::type,
-              typename = typename std::enable_if<std::is_default_constructible<T>::value>::type>
     void waitPop(T& item) {
-        std::unique_ptr<node<T>> const oldHead = waitPopHead(item);
+        std::unique_ptr<node> const oldHead = waitPopHead(item);
         if(!oldHead.get())
             return;
         m_roomAwaiting.notify_one();
     }
 
-    template <typename T,
-              typename = typename std::enable_if<std::is_nothrow_copy_constructible<T>::value>::type,
-              typename = typename std::enable_if<std::is_default_constructible<T>::value>::type>
     std::shared_ptr<T> waitPop() {
-        std::unique_ptr<node<T>> const oldHead = waitPopHead();
+        std::unique_ptr<node> const oldHead = waitPopHead();
         if(!oldHead.get())
             return std::shared_ptr<T>();
         m_roomAwaiting.notify_one();
         return oldHead->data;
-    }
+    }    
 
     bool empty() {
         std::lock_guard<std::mutex> headLock(m_headMutex);
@@ -133,41 +114,37 @@ public:
     }
 
 private:
-    template <typename T>
-    node<T>* getTail()
+    node* getTail()
     {
         std::lock_guard<std::mutex> tailLock(m_tailMutex);
         return m_tail;
     }
 
     /*****POP AREA*****/
-    template <typename T>
-    std::unique_ptr<node<T>> popHead()
+    std::unique_ptr<node> popHead()
     {
-        std::unique_ptr<node<T>> oldHead = std::move(m_head);
+        std::unique_ptr<node> oldHead = std::move(m_head);
         m_head = std::move(oldHead->next);
         return oldHead;
     }
 
-    template <typename T>
-    std::unique_ptr<node<T>> tryPopHead()
+    std::unique_ptr<node> tryPopHead()
     {
         std::unique_lock<std::mutex> headLock(m_headMutex);
         if(m_head.get() == getTail())
         {
-            return std::unique_ptr<node<T>>();
+            return std::unique_ptr<node>();
         }
         getTail()->number--;
         return popHead();
     }
 
-    template <typename T>
-    std::unique_ptr<node<T>> tryPopHead(T& item)
+    std::unique_ptr<node> tryPopHead(T& item)
     {
         std::unique_lock<std::mutex> headLock(m_headMutex);
         if(m_head.get() == getTail())
         {
-            return std::unique_ptr<node<T>>();
+            return std::unique_ptr<node>();
         }
         getTail()->number--;
         item = std::move(*m_head->data);
@@ -182,22 +159,20 @@ private:
         return headLock;
     }
 
-    template <typename T>
-    std::unique_ptr<node<T>> waitPopHead()
+    std::unique_ptr<node> waitPopHead()
     {
         std::unique_lock<std::mutex> headLock(waitForData());
         if(m_stopWaitForData.exchange(false, std::memory_order_acq_rel))
-            return std::unique_ptr<node<T>>();
+            return std::unique_ptr<node>();
         getTail()->number--;
         return popHead();
     }
 
-    template <typename T>
-    std::unique_ptr<node<T>> waitPopHead(T& item)
+    std::unique_ptr<node> waitPopHead(T& item)
     {
         std::unique_lock<std::mutex> headLock(waitForData());
         if(m_stopWaitForData.exchange(false, std::memory_order_acq_rel))
-            return std::unique_ptr<node<T>>();
+            return std::unique_ptr<node>();
         getTail()->number--;
         item = std::move(*m_head->data);
         return popHead();
@@ -214,23 +189,22 @@ private:
         return tailLock;
     }
 
-    template <typename T>
-    void pushToTail(std::shared_ptr<T>& newData, std::unique_ptr<node<T>> newVertex)
+    void pushToTail(std::shared_ptr<T>& newData, std::unique_ptr<node> newVertex)
     {
-        std::static_pointer_cast<T>(m_tail->data) = newData;
-        node<void*>* const newTail = newVertex.get();
+        m_tail->data = newData;
+        node* const newTail = newVertex.get();
         m_tail->next = std::move(newVertex);
         newTail->number = ++m_tail->number;
         m_tail = newTail;        
     }
     /*****PUSH AREA END*****/
 private:
-    std::atomic_bool                m_stopWaitForData{false};
-    std::atomic_bool                m_stopWaitForRoom{false};
-    std::mutex                      m_headMutex;
-    std::unique_ptr<node<void*>>    m_head;
-    std::mutex                      m_tailMutex;
-    node<void*>*                    m_tail;
-    std::condition_variable         m_dataAwaiting;
-    std::condition_variable         m_roomAwaiting;
+    std::atomic_bool        m_stopWaitForData{false};
+    std::atomic_bool        m_stopWaitForRoom{false};
+    std::mutex              m_headMutex;
+    std::unique_ptr<node>   m_head;
+    std::mutex              m_tailMutex;
+    node*                   m_tail;
+    std::condition_variable m_dataAwaiting;
+    std::condition_variable m_roomAwaiting;
 };
