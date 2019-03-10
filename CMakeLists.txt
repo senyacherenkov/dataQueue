@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.5)
 
-project(dataQueue VERSION 0.0.$ENV{TRAVIS_BUILD_NUMBER})
+project(dataQueue)
+#VERSION 0.0.$ENV{TRAVIS_BUILD_NUMBER})
 
 find_package(Boost COMPONENTS unit_test_framework REQUIRED)
 
