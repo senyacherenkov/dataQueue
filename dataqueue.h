@@ -169,8 +169,7 @@ public:
     std::string storeToDisk(const char* name) {
 
         std::string filename(name);
-        filename += std::to_string(getSecondsSinceEpoch());
-        filename += ".txt";
+        filename += std::to_string(getSecondsSinceEpoch());        
 
         std::ofstream ifs(filename, std::ios_base::out | std::ios::binary);
         if(ifs.is_open())
@@ -184,7 +183,7 @@ public:
                 node* temp = m_head.get();
                 while (temp != m_tail) {
                     T& data = *temp->data;
-                    write(data);
+                    write(data, ifs);
                     temp = temp->next.get();
                 }
             }
@@ -194,19 +193,13 @@ public:
     }
 
     bool tryReadFromDisk(const char* filename) {
-        std::ifstream ofs(filename, std::ios_base::in);
+        std::ifstream ofs(filename, std::ios_base::in | std::ios::binary);
         if(ofs.is_open())
         {
-            std::string rawData;
-            ofs >> rawData;
-
-            unsigned long pos = 0;
-            while(!rawData.empty())
-            {                
-
-                if(!tryPush(read<T>(temp)))
-                    return false;
-                rawData.erase(rawData.begin(), std::next(rawData.begin(), static_cast<long>(pos + 1)));
+            while(!full())
+            {
+                if(!tryPush(read<T>(ofs)))
+                    return false;                
             }
         } else {
             return false;
@@ -215,21 +208,17 @@ public:
     }
 
     void waitReadFromDisk(const char* filename) {
-        std::ifstream ofs(filename, std::ios_base::in | std::ios_base::trunc);
+        std::ifstream ofs(filename, std::ios_base::in | std::ios::binary);
         if(ofs.is_open())
         {
-            std::string rawData;
-            ofs >> rawData;
-
-            unsigned long pos = 0;
-            while(pos != std::string::npos)
+            while(!full())
             {
-                pos = rawData.find_first_of(DELIMETER);
-                std::string temp(rawData.begin(), std::next(rawData.begin(), static_cast<long>(pos)));
-                waitPush(read<T>(temp));
-                rawData.erase(rawData.begin(), std::next(rawData.begin(), static_cast<long>(pos)));
+                waitPush(read<T>(ofs));
             }
+        } else {
+            return;
         }
+        return;
     }
 private:
     node* getTail()
