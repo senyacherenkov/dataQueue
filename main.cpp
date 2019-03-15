@@ -274,21 +274,82 @@ BOOST_AUTO_TEST_CASE(store_and_try_read_from_disk_fundamental_double_type)
         BOOST_CHECK_MESSAGE(*queueForStore.tryPop() == *queueForRead.tryPop(), "queues are not identical");
 }
 
-BOOST_AUTO_TEST_CASE(store_and_try_read_from_disk_fundamental_user_type)
+BOOST_AUTO_TEST_CASE(store_and_try_read_from_disk_fundamental_user_type_pod)
 {
     struct userType{
         userType() = default;
-        userType(uint32_t value1, uint32_t value2, double value3):
-            member1(value1),
-            member2(value2),
-            member3(value3)
+
+        uint32_t member1;
+        uint32_t member2;
+        double member3;
+
+        bool operator == (const userType& rhs) const
+        {
+            return member1 == rhs.member1 &&
+                   member2 == rhs.member2 &&
+                   member3 == rhs.member3;
+        }
+    };
+
+    threadsafe::queue<userType, QUEUE_SIZE> queueForStore;
+    threadsafe::queue<userType, QUEUE_SIZE> queueForRead;
+    std::string filename("queue_snapshot_");
+
+    for (int j = 0; j < QUEUE_SIZE; ++j) {
+        userType instance;
+        instance.member1 = static_cast<uint32_t>(j);
+        instance.member2 = static_cast<uint32_t>(j + 1);
+        instance.member3 = j + 0.5;
+
+        BOOST_CHECK_MESSAGE(queueForStore.tryPush(instance), "cannot push data into queue");
+    }
+
+    filename = queueForStore.storeToDisk(filename.c_str());
+    bool isReadOk = queueForRead.tryReadFromDisk(filename.c_str());
+    BOOST_CHECK_MESSAGE(isReadOk, "reading data from disk was failed");
+    BOOST_CHECK_MESSAGE(queueForRead.full(), "queue for reading was filled wrong");
+
+    for (int j = 0; j < QUEUE_SIZE; ++j)
+        BOOST_CHECK_MESSAGE(*queueForStore.tryPop() == *queueForRead.tryPop(), "queues are not identical");
+}
+
+/*
+ * userType which is not a POD type should provide two methods:
+ * serialize() and deserialize()
+*/
+BOOST_AUTO_TEST_CASE(store_and_try_read_from_disk_fundamental_user_type_not_pod)
+{
+    struct userType{
+        userType() = default;
+        userType(uint32_t m1, uint32_t m2, double m3):
+            member1(m1),
+            member2(m2),
+            member3(m3)
         {}
 
-        userType(const userType& other) = default;
+        ~userType(){}
 
-        uint32_t member1{0};
-        uint32_t member2{0};
-        double member3{0};
+        uint32_t member1;
+        uint32_t member2;
+        double member3;
+
+        std::ostream& serialize(std::ofstream& ifs) const
+        {
+            ifs.write(reinterpret_cast<const char*>(&member1), sizeof (uint32_t));
+            ifs.write(reinterpret_cast<const char*>(&member2), sizeof (uint32_t));
+            ifs.write(reinterpret_cast<const char*>(&member3), sizeof (double));
+            return ifs;
+        }
+
+        bool deserialize(std::ifstream& ofs)
+        {
+            ofs.read(reinterpret_cast<char*>(&member1), sizeof(uint32_t));
+            ofs.read(reinterpret_cast<char*>(&member2), sizeof(uint32_t));
+            ofs.read(reinterpret_cast<char*>(&member3), sizeof(double));
+            if(ofs)
+                return true;
+            return false;
+        }
 
         bool operator == (const userType& rhs) const
         {
@@ -315,5 +376,4 @@ BOOST_AUTO_TEST_CASE(store_and_try_read_from_disk_fundamental_user_type)
     for (int j = 0; j < QUEUE_SIZE; ++j)
         BOOST_CHECK_MESSAGE(*queueForStore.tryPop() == *queueForRead.tryPop(), "queues are not identical");
 }
-
 BOOST_AUTO_TEST_SUITE_END()

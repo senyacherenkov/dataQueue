@@ -28,18 +28,17 @@ namespace {
     }
 
     template<typename T, typename = typename std::enable_if<std::is_pod<T>::value>::type>
-    T read(std::ifstream& ofs)
-    {
-        T value;
-        ofs.read(reinterpret_cast<char*>(&value), sizeof(T));
-        return value;
+    bool read(T& value, std::ifstream& ofs)
+    {        
+        if(!ofs.read(reinterpret_cast<char*>(&value), sizeof(T)))
+            return false;
+        return true;
     }
 
     template<typename T>
-    typename std::enable_if<!std::is_pod<T>::value, T>::type
-    read(std::ifstream& ofs)
-    {
-        T value;
+    typename std::enable_if<!std::is_pod<T>::value, bool>::type
+    read(T& value, std::ifstream& ofs)
+    {        
         return value.deserialize(ofs);
     }
 
@@ -196,10 +195,14 @@ public:
         std::ifstream ofs(filename, std::ios_base::in | std::ios::binary);
         if(ofs.is_open())
         {
-            while(!full())
+            while(!ofs.eof())
             {
-                if(!tryPush(read<T>(ofs)))
-                    return false;                
+                T value;
+                bool eof = ofs.eof();
+                if(!read<T>(value, ofs) && ofs)
+                    return false;
+                else if(!tryPush(value))
+                    return false;
             }
         } else {
             return false;
@@ -207,19 +210,6 @@ public:
         return true;
     }
 
-    void waitReadFromDisk(const char* filename) {
-        std::ifstream ofs(filename, std::ios_base::in | std::ios::binary);
-        if(ofs.is_open())
-        {
-            while(!full())
-            {
-                waitPush(read<T>(ofs));
-            }
-        } else {
-            return;
-        }
-        return;
-    }
 private:
     node* getTail()
     {
