@@ -2,22 +2,15 @@ language: cpp
 dist: trusty
 sudo: required
 os: linux
-
-matrix:
-  include:
-    - env: COMPILER=gcc CXX=g++-5 CC=gcc-5 BUILD=Debug STANDARD=14
-      compiler: gcc
-      addons:
-        apt:
-          update: true
-          sources:
-            - llvm-toolchain-precise-3.8
-            - sourceline: 'ppa:mhier/libboost-latest'
-            - ubuntu-toolchain-r-test
-	    - os: linux
-          packages:
-            - g++-5
-            - boost1.67
+compiler: g++
+install: export CXX="g++-5"
+addons:
+	apt:
+	sources:
+	- ubuntu-toolchain-r-test
+	packages:
+	- g++-5
+	- boost1.67
 script:
 - cmake .
 - cmake --build .
