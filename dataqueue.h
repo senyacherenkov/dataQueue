@@ -14,6 +14,11 @@
 #include <iostream>
 
 namespace {
+    template<typename T, typename... Args>
+    std::unique_ptr<T> make_unique(Args&&... args) {
+        return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
+    }
+
     template<typename T, typename = typename std::enable_if<std::is_pod<T>::value>::type>
     std::ostream& write(const T& value, std::ofstream& ifs)
     {        
@@ -74,7 +79,7 @@ private:
 
 public:
     queue():
-        m_head(std::make_unique<node>()), m_tail(m_head.get())
+        m_head(make_unique<node>()), m_tail(m_head.get())
     {}
 
     queue(const queue& other) = delete;
@@ -86,7 +91,7 @@ public:
 
     bool tryPush(const T& newItem) {
         std::shared_ptr<T> newData = std::make_shared<T>(newItem);
-        std::unique_ptr<node> newVertex(std::make_unique<node>());
+        std::unique_ptr<node> newVertex(make_unique<node>());
 
         {
             std::lock_guard<std::mutex> tailLock(m_tailMutex);
@@ -104,7 +109,7 @@ public:
 
     void waitPush(const T& newItem) {
         std::shared_ptr<T> newData = std::make_shared<T>(newItem);
-        std::unique_ptr<node> newVertex(std::make_unique<node>());
+        std::unique_ptr<node> newVertex(make_unique<node>());
 
         {
             std::unique_lock<std::mutex> tailLock(waitForRoom());
