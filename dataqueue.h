@@ -199,8 +199,11 @@ public:
             {
                 T value;
                 bool eof = ofs.eof();
-                if(!read<T>(value, ofs) && ofs)
-                    return false;
+                if(!read<T>(value, ofs))
+                    if(ofs)
+                        return false;
+                    else
+                        break;
                 else if(!tryPush(value))
                     return false;
             }
